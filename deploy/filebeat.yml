@@ -1,0 +1,35 @@
+# filebeat.yml — ship the wapgo structured logs (logs/{api,consumer,thirdparty,trace}.log)
+# to Elasticsearch. Each line is already JSON, so Filebeat just decodes and forwards it.
+#
+# Run locally:   filebeat -c filebeat.yml -e
+# The app writes JSON; Filebeat ships it — the two are fully decoupled.
+
+filebeat.inputs:
+  - type: filestream
+    id: wapgo-logs
+    paths:
+      - ${WAPGO_LOG_DIR:-./logs}/api*.log
+      - ${WAPGO_LOG_DIR:-./logs}/consumer*.log
+      - ${WAPGO_LOG_DIR:-./logs}/thirdparty*.log
+      - ${WAPGO_LOG_DIR:-./logs}/trace*.log
+    parsers:
+      - ndjson:
+          target: ""
+          add_error_key: true
+          overwrite_keys: true
+
+processors:
+  - add_fields:
+      target: ""
+      fields:
+        service.name: ${APP_NAME:-wapgo-service}
+
+# One index per log category (api / consumer / thirdparty / trace), keyed by the
+# "log" field that every sink line carries.
+setup.ilm.enabled: false
+setup.template.name: "wapgo"
+setup.template.pattern: "wapgo-*"
+
+output.elasticsearch:
+  hosts: ["${ELASTICSEARCH_HOSTS:-http://localhost:9200}"]
+  index: "wapgo-%{[log]:other}-%{+yyyy.MM.dd}"
