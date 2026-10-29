@@ -1,7 +1,6 @@
 -- 000001_init: base schema.
--- Kept portable across PostgreSQL 14+ and MySQL 8+ so either driver can be
--- migrated with the same file. Relay-specific tables get their own
--- Postgres-only migrations later.
+-- Relay is Postgres-only, so timestamps use TIMESTAMPTZ to preserve the
+-- instant regardless of the server/client timezone.
 --
 -- Mirrors internal/domain/entity/user.go (GORM model) exactly, including the
 -- index names GORM would create, so AutoMigrate in development is a no-op.
@@ -11,9 +10,9 @@ CREATE TABLE users (
     name       VARCHAR(100) NOT NULL,
     email      VARCHAR(255) NOT NULL,
     password   VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    deleted_at TIMESTAMP(3) NULL,
+    created_at TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ   NULL,
     PRIMARY KEY (id)
 );
 
