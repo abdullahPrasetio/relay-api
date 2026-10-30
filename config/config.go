@@ -54,11 +54,24 @@ type HealthConfig struct {
 }
 
 // JWTConfig holds parameters for HS256 token signing and verification.
+//
+// AccessTTL/RefreshTTL/RefreshGrace drive the auth sessions:
+//   - AccessTTL   access JWT lifetime            (JWT_ACCESS_TTL,   default 15m)
+//   - RefreshTTL  idle lifetime of a refresh token, slid on every rotation
+//     (JWT_REFRESH_TTL, default 720h = 30 days)
+//   - RefreshGrace window in which the previous refresh token still returns
+//     the pair produced by the rotation (JWT_REFRESH_GRACE, default 120s)
+//
+// The legacy Expiry field is kept for other services that only mint access
+// tokens; the auth usecase uses AccessTTL.
 type JWTConfig struct {
-	Secret   string `mapstructure:"secret"`
-	Issuer   string `mapstructure:"issuer"`
-	Audience string `mapstructure:"audience"`
-	Expiry   string `mapstructure:"expiry"`
+	Secret       string `mapstructure:"secret"`
+	Issuer       string `mapstructure:"issuer"`
+	Audience     string `mapstructure:"audience"`
+	Expiry       string `mapstructure:"expiry"`
+	AccessTTL    string `mapstructure:"access_ttl"`
+	RefreshTTL   string `mapstructure:"refresh_ttl"`
+	RefreshGrace string `mapstructure:"refresh_grace"`
 }
 
 // ObservabilityConfig controls which observability backend is used.
@@ -144,62 +157,65 @@ func Load() (*Config, error) {
 	v.AutomaticEnv()
 
 	bindings := map[string]string{
-		"app.env":                       "APP_ENV",
-		"app.port":                      "APP_PORT",
-		"app.name":                      "APP_NAME",
-		"app.cors_allowed_origins":      "APP_CORS_ALLOWED_ORIGINS",
-		"db.driver":                     "DB_DRIVER",
-		"db.host":                       "DB_HOST",
-		"db.port":                       "DB_PORT",
-		"db.name":                       "DB_NAME",
-		"db.user":                       "DB_USER",
-		"db.password":                   "DB_PASSWORD",
-		"db.max_open_conns":             "DB_MAX_OPEN_CONNS",
-		"db.max_idle_conns":             "DB_MAX_IDLE_CONNS",
-		"db.conn_max_life":              "DB_CONN_MAX_LIFE",
-		"db.auto_migrate":               "DB_AUTO_MIGRATE",
-		"db.sslmode":                    "DB_SSL_MODE",
-		"redis.url":            "REDIS_URL",
-		"redis.password":       "REDIS_PASSWORD",
-		"redis.db":             "REDIS_DB",
-		"redis.pool_size":      "REDIS_POOL_SIZE",
-		"redis.min_idle_conns": "REDIS_MIN_IDLE_CONNS",
-		"redis.dial_timeout":   "REDIS_DIAL_TIMEOUT",
-		"redis.read_timeout":   "REDIS_READ_TIMEOUT",
-		"redis.write_timeout":  "REDIS_WRITE_TIMEOUT",
-		"redis.max_retries":    "REDIS_MAX_RETRIES",
-		"kafka.brokers":             "KAFKA_BROKERS",
-		"kafka.group_id":            "KAFKA_GROUP_ID",
-		"kafka.heartbeat_interval": "KAFKA_HEARTBEAT_INTERVAL",
-		"kafka.session_timeout":    "KAFKA_SESSION_TIMEOUT",
-		"kafka.rebalance_timeout":  "KAFKA_REBALANCE_TIMEOUT",
-		"rabbitmq.dsn":                  "RABBITMQ_DSN",
-		"rabbitmq.exchange":             "RABBITMQ_EXCHANGE",
-		"log.level":                     "LOG_LEVEL",
-		"log.to_file":                   "LOG_TO_FILE",
-		"log.file_path":                 "LOG_FILE_PATH",
-		"log.dir":                       "LOG_DIR",
-		"log.rotation":                  "LOG_ROTATION",
-		"log.max_age_days":              "LOG_MAX_AGE_DAYS",
-		"log.body_max_bytes":            "LOG_BODY_MAX_BYTES",
-		"log.http_bodies":               "LOG_HTTP_BODIES",
-		"services.user_url":             "USER_SERVICE_URL",
-		"services.order_url":            "ORDER_SERVICE_URL",
-		"jwt.secret":                    "JWT_SECRET",
-		"jwt.issuer":                    "JWT_ISSUER",
-		"jwt.audience":                  "JWT_AUDIENCE",
-		"jwt.expiry":                    "JWT_EXPIRY",
-		"observability.provider":                    "OBSERVABILITY_PROVIDER",
-		"observability.tracing_enabled":             "OTEL_TRACING_ENABLED",
-		"observability.otlp_endpoint":               "OTEL_EXPORTER_OTLP_ENDPOINT",
-		"health.probe_timeout":                      "HEALTH_PROBE_TIMEOUT",
-		"notification.smtp.host":                    "SMTP_HOST",
-		"notification.smtp.port":                    "SMTP_PORT",
-		"notification.smtp.username":                "SMTP_USERNAME",
-		"notification.smtp.password":                "SMTP_PASSWORD",
-		"notification.smtp.from":                    "SMTP_FROM",
-		"notification.smtp.timeout":                 "SMTP_TIMEOUT",
-		"notification.firebase.credentials_json":    "FIREBASE_CREDENTIALS_JSON",
+		"app.env":                                "APP_ENV",
+		"app.port":                               "APP_PORT",
+		"app.name":                               "APP_NAME",
+		"app.cors_allowed_origins":               "APP_CORS_ALLOWED_ORIGINS",
+		"db.driver":                              "DB_DRIVER",
+		"db.host":                                "DB_HOST",
+		"db.port":                                "DB_PORT",
+		"db.name":                                "DB_NAME",
+		"db.user":                                "DB_USER",
+		"db.password":                            "DB_PASSWORD",
+		"db.max_open_conns":                      "DB_MAX_OPEN_CONNS",
+		"db.max_idle_conns":                      "DB_MAX_IDLE_CONNS",
+		"db.conn_max_life":                       "DB_CONN_MAX_LIFE",
+		"db.auto_migrate":                        "DB_AUTO_MIGRATE",
+		"db.sslmode":                             "DB_SSL_MODE",
+		"redis.url":                              "REDIS_URL",
+		"redis.password":                         "REDIS_PASSWORD",
+		"redis.db":                               "REDIS_DB",
+		"redis.pool_size":                        "REDIS_POOL_SIZE",
+		"redis.min_idle_conns":                   "REDIS_MIN_IDLE_CONNS",
+		"redis.dial_timeout":                     "REDIS_DIAL_TIMEOUT",
+		"redis.read_timeout":                     "REDIS_READ_TIMEOUT",
+		"redis.write_timeout":                    "REDIS_WRITE_TIMEOUT",
+		"redis.max_retries":                      "REDIS_MAX_RETRIES",
+		"kafka.brokers":                          "KAFKA_BROKERS",
+		"kafka.group_id":                         "KAFKA_GROUP_ID",
+		"kafka.heartbeat_interval":               "KAFKA_HEARTBEAT_INTERVAL",
+		"kafka.session_timeout":                  "KAFKA_SESSION_TIMEOUT",
+		"kafka.rebalance_timeout":                "KAFKA_REBALANCE_TIMEOUT",
+		"rabbitmq.dsn":                           "RABBITMQ_DSN",
+		"rabbitmq.exchange":                      "RABBITMQ_EXCHANGE",
+		"log.level":                              "LOG_LEVEL",
+		"log.to_file":                            "LOG_TO_FILE",
+		"log.file_path":                          "LOG_FILE_PATH",
+		"log.dir":                                "LOG_DIR",
+		"log.rotation":                           "LOG_ROTATION",
+		"log.max_age_days":                       "LOG_MAX_AGE_DAYS",
+		"log.body_max_bytes":                     "LOG_BODY_MAX_BYTES",
+		"log.http_bodies":                        "LOG_HTTP_BODIES",
+		"services.user_url":                      "USER_SERVICE_URL",
+		"services.order_url":                     "ORDER_SERVICE_URL",
+		"jwt.secret":                             "JWT_SECRET",
+		"jwt.issuer":                             "JWT_ISSUER",
+		"jwt.audience":                           "JWT_AUDIENCE",
+		"jwt.expiry":                             "JWT_EXPIRY",
+		"jwt.access_ttl":                         "JWT_ACCESS_TTL",
+		"jwt.refresh_ttl":                        "JWT_REFRESH_TTL",
+		"jwt.refresh_grace":                      "JWT_REFRESH_GRACE",
+		"observability.provider":                 "OBSERVABILITY_PROVIDER",
+		"observability.tracing_enabled":          "OTEL_TRACING_ENABLED",
+		"observability.otlp_endpoint":            "OTEL_EXPORTER_OTLP_ENDPOINT",
+		"health.probe_timeout":                   "HEALTH_PROBE_TIMEOUT",
+		"notification.smtp.host":                 "SMTP_HOST",
+		"notification.smtp.port":                 "SMTP_PORT",
+		"notification.smtp.username":             "SMTP_USERNAME",
+		"notification.smtp.password":             "SMTP_PASSWORD",
+		"notification.smtp.from":                 "SMTP_FROM",
+		"notification.smtp.timeout":              "SMTP_TIMEOUT",
+		"notification.firebase.credentials_json": "FIREBASE_CREDENTIALS_JSON",
 	}
 	for key, env := range bindings {
 		if err := v.BindEnv(key, env); err != nil {
@@ -238,6 +254,9 @@ func Load() (*Config, error) {
 	v.SetDefault("jwt.issuer", "service")
 	v.SetDefault("jwt.audience", "api")
 	v.SetDefault("jwt.expiry", "24h")
+	v.SetDefault("jwt.access_ttl", "15m")
+	v.SetDefault("jwt.refresh_ttl", "720h")
+	v.SetDefault("jwt.refresh_grace", "120s")
 	v.SetDefault("observability.provider", "otel")
 	v.SetDefault("observability.tracing_enabled", false)
 	v.SetDefault("health.probe_timeout", "2s")

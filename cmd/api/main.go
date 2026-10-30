@@ -18,6 +18,7 @@ import (
 	"github.com/abdullahPrasetio/relay-api/internal/domain/entity"
 	dbrepo "github.com/abdullahPrasetio/relay-api/internal/repository/db"
 	"github.com/abdullahPrasetio/relay-api/internal/usecase"
+	"github.com/abdullahPrasetio/relay-api/pkg/auth"
 	"github.com/abdullahPrasetio/relay-api/pkg/database"
 	applogger "github.com/abdullahPrasetio/relay-api/pkg/logger"
 	"github.com/abdullahPrasetio/relay-api/pkg/observability"
@@ -70,7 +71,7 @@ func main() {
 			log.Fatal().Msg("DB_AUTO_MIGRATE is not allowed in production; run ./cmd/migrate instead")
 		}
 		log.Warn().Msg("DB_AUTO_MIGRATE is enabled: development only, use ./cmd/migrate for real schema changes")
-		if err := db.AutoMigrate(&entity.User{}); err != nil {
+		if err := db.AutoMigrate(&entity.User{}, &entity.Session{}); err != nil {
 			log.Fatal().Err(err).Msg("auto-migrate failed")
 		}
 	}
@@ -79,8 +80,29 @@ func main() {
 	userUC := usecase.NewUserUseCase(userRepo)
 	val := validator.New()
 
+	accessTTL := durationOr(cfg.JWT.AccessTTL, usecase.DefaultAccessTTL)
+	authCfg := &auth.Config{
+		Secret:   cfg.JWT.Secret,
+		Issuer:   cfg.JWT.Issuer,
+		Audience: cfg.JWT.Audience,
+		Expiry:   accessTTL,
+	}
+	if len(authCfg.Secret) < 32 {
+		log.Warn().Int("bytes", len(authCfg.Secret)).
+			Msg("JWT_SECRET is shorter than 32 bytes: token signing will fail")
+	}
+	authUC := usecase.NewAuthUseCase(userRepo, userUC, dbrepo.NewSessionRepository(db), authCfg, usecase.AuthOptions{
+		AccessTTL:   accessTTL,
+		RefreshTTL:  durationOr(cfg.JWT.RefreshTTL, usecase.DefaultRefreshTTL),
+		GracePeriod: durationOr(cfg.JWT.RefreshGrace, usecase.DefaultRefreshGrace),
+	})
+
+	workspaceUC := usecase.NewWorkspaceUseCase(dbrepo.NewWorkspaceRepository(db))
+
 	startTime := time.Now()
 	userHandler := handler.NewUserHandler(userUC, val)
+	authHandler := handler.NewAuthHandler(authUC, val)
+	workspaceHandler := handler.NewWorkspaceHandler(workspaceUC)
 	healthHandler := handler.NewHealthHandler(sqlDB, startTime, version)
 
 	app := fiber.New(fiber.Config{
@@ -116,7 +138,7 @@ func main() {
 		CaptureBodies: cfg.Log.HTTPBodies,
 	}))
 
-	route.Setup(app, userHandler, healthHandler, cfg.App.Env)
+	route.Setup(app, userHandler, authHandler, workspaceHandler, healthHandler, authCfg, cfg.App.Env)
 
 	go func() {
 		addr := ":" + cfg.App.Port
@@ -145,4 +167,18 @@ func main() {
 	sqlDB.Close() //nolint:errcheck
 
 	log.Info().Msg("shutdown complete")
+}
+
+// durationOr parses a Go duration string, falling back to def when unset or
+// invalid so a typo in an optional TTL never prevents the API from booting.
+func durationOr(raw string, def time.Duration) time.Duration {
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		log.Warn().Str("value", raw).Dur("fallback", def).Msg("invalid duration config")
+		return def
+	}
+	return d
 }
