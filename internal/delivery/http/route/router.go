@@ -13,6 +13,8 @@ func Setup(
 	userHandler *handler.UserHandler,
 	authHandler *handler.AuthHandler,
 	workspaceHandler *handler.WorkspaceHandler,
+	inviteHandler *handler.InviteHandler,
+	realtimeHandler *handler.RealtimeHandler,
 	healthHandler *handler.HealthHandler,
 	authCfg *auth.Config,
 	appEnv string,
@@ -25,6 +27,8 @@ func Setup(
 	RegisterUserRoutes(v1, userHandler)
 	RegisterAuthRoutes(v1, authHandler, authCfg)
 	RegisterWorkspaceRoutes(v1, workspaceHandler, authCfg)
+	RegisterInviteRoutes(v1, inviteHandler, workspaceHandler, authCfg)
+	RegisterRealtimeRoutes(v1, realtimeHandler, authCfg)
 }
 
 // prodGuard returns 404 for internal endpoints when APP_ENV=production.

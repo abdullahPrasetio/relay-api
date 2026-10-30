@@ -57,7 +57,12 @@ func AccessLog(opts AccessLogOptions) fiber.Handler {
 		respHeaders := map[string]string{}
 		c.Response().Header.VisitAll(func(k, v []byte) { respHeaders[string(k)] = string(v) })
 		respBody := "[omitted]"
-		if opts.CaptureBodies {
+		switch {
+		case c.Response().IsBodyStream():
+			// Reading a streamed body consumes/attaches the writer, which would
+			// break SSE and other streaming responses.
+			respBody = "[stream]"
+		case opts.CaptureBodies:
 			respBody = journal.CapBody(c.Response().Body(), string(c.Response().Header.ContentType()), opts.BodyMaxBytes)
 		}
 

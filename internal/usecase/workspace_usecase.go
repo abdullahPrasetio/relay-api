@@ -44,6 +44,10 @@ type WorkspaceUseCase interface {
 	UpdateMemberRole(ctx context.Context, actorID uuid.UUID, workspaceID string, userID uuid.UUID, role entity.Role) (*entity.WorkspaceMember, error)
 	RemoveMember(ctx context.Context, actorID uuid.UUID, workspaceID string, userID uuid.UUID) error
 
+	// ListAudit returns audit events newest-first. Only admin+ may read them.
+	// nextBefore is 0 when there are no older events.
+	ListAudit(ctx context.Context, userID uuid.UUID, workspaceID string, beforeID int64, limit int) ([]entity.AuditEvent, int64, error)
+
 	PushChanges(ctx context.Context, workspaceID string, actorID uuid.UUID, changes []entity.Change) ([]entity.PushResult, int64, error)
 	PullChanges(ctx context.Context, workspaceID string, actorID uuid.UUID, since int64, limit int) (*entity.PullResult, error)
 }
@@ -102,7 +106,7 @@ func (u *workspaceUseCase) RenameWorkspace(ctx context.Context, userID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
-	if err := u.repo.RenameWorkspace(ctx, workspaceID, name); err != nil {
+	if err := u.repo.RenameWorkspace(ctx, workspaceID, name, userID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -116,7 +120,7 @@ func (u *workspaceUseCase) DeleteWorkspace(ctx context.Context, userID uuid.UUID
 	if _, _, err := u.authorize(ctx, workspaceID, userID, entity.PermissionDeleteWorkspace); err != nil {
 		return err
 	}
-	if err := u.repo.SoftDeleteWorkspace(ctx, workspaceID); err != nil {
+	if err := u.repo.SoftDeleteWorkspace(ctx, workspaceID, userID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrNotFound
 		}
@@ -181,7 +185,7 @@ func (u *workspaceUseCase) UpdateMemberRole(ctx context.Context, actorID uuid.UU
 		return nil, fmt.Errorf("%w: only the owner can change an admin role", ErrForbidden)
 	}
 
-	if err := u.repo.UpdateMemberRole(ctx, workspaceID, userID, role); err != nil {
+	if err := u.repo.UpdateMemberRole(ctx, workspaceID, userID, role, actorID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -211,13 +215,38 @@ func (u *workspaceUseCase) RemoveMember(ctx context.Context, actorID uuid.UUID, 
 		return fmt.Errorf("%w: only the owner can remove an admin", ErrForbidden)
 	}
 
-	if err := u.repo.RemoveMember(ctx, workspaceID, userID); err != nil {
+	if err := u.repo.RemoveMember(ctx, workspaceID, userID, actorID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrNotFound
 		}
 		return err
 	}
 	return nil
+}
+
+// ListAudit pages the workspace audit log. Admin+ only: the audit log exposes
+// actor identities and security-relevant actions.
+func (u *workspaceUseCase) ListAudit(ctx context.Context, userID uuid.UUID, workspaceID string, beforeID int64, limit int) ([]entity.AuditEvent, int64, error) {
+	if _, _, err := u.authorize(ctx, workspaceID, userID, entity.PermissionManageMembers); err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	events, err := u.repo.ListAudit(ctx, workspaceID, beforeID, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var nextBefore int64
+	if len(events) == limit && len(events) > 0 {
+		nextBefore = events[len(events)-1].ID
+	}
+	return events, nextBefore, nil
 }
 
 // PushChanges applies a client delta batch. The repository re-checks

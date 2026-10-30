@@ -16,6 +16,7 @@ import (
 	mw "github.com/abdullahPrasetio/relay-api/internal/delivery/http/middleware"
 	"github.com/abdullahPrasetio/relay-api/internal/delivery/http/route"
 	"github.com/abdullahPrasetio/relay-api/internal/domain/entity"
+	"github.com/abdullahPrasetio/relay-api/internal/realtime"
 	dbrepo "github.com/abdullahPrasetio/relay-api/internal/repository/db"
 	"github.com/abdullahPrasetio/relay-api/internal/usecase"
 	"github.com/abdullahPrasetio/relay-api/pkg/auth"
@@ -97,19 +98,36 @@ func main() {
 		GracePeriod: durationOr(cfg.JWT.RefreshGrace, usecase.DefaultRefreshGrace),
 	})
 
-	workspaceUC := usecase.NewWorkspaceUseCase(dbrepo.NewWorkspaceRepository(db))
+	workspaceRepo := dbrepo.NewWorkspaceRepository(db)
+
+	// Realtime: pg_notify after a committed push wakes SSE subscribers; clients
+	// still pull with their own cursor, so a lost notification is harmless.
+	notifier := realtime.NewNotifier(sqlDB)
+	realtimeCtx, stopRealtime := context.WithCancel(context.Background())
+	listener, err := realtime.NewListenerFromConfig(realtimeCtx, &cfg.DB)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to start realtime listener")
+	}
+	presence := realtime.NewPresenceStore(sqlDB)
+
+	workspaceUC := usecase.WithChangeNotifier(usecase.NewWorkspaceUseCase(workspaceRepo), notifier)
+	inviteUC := usecase.NewInviteUseCase(dbrepo.NewInviteRepository(db), workspaceRepo)
 
 	startTime := time.Now()
 	userHandler := handler.NewUserHandler(userUC, val)
 	authHandler := handler.NewAuthHandler(authUC, val)
 	workspaceHandler := handler.NewWorkspaceHandler(workspaceUC)
+	inviteHandler := handler.NewInviteHandler(inviteUC)
+	realtimeHandler := handler.NewRealtimeHandler(workspaceUC, listener, presence)
 	healthHandler := handler.NewHealthHandler(sqlDB, startTime, version)
 
 	app := fiber.New(fiber.Config{
-		AppName:               cfg.App.Name,
-		BodyLimit:             4 * 1024 * 1024,
-		ReadTimeout:           10 * time.Second,
-		WriteTimeout:          10 * time.Second,
+		AppName:     cfg.App.Name,
+		BodyLimit:   4 * 1024 * 1024,
+		ReadTimeout: 10 * time.Second,
+		// 0 disables the write deadline: SSE streams stay open until the
+		// client disconnects (heartbeats keep intermediaries alive).
+		WriteTimeout:          0,
 		IdleTimeout:           120 * time.Second,
 		DisableStartupMessage: true,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
@@ -138,7 +156,7 @@ func main() {
 		CaptureBodies: cfg.Log.HTTPBodies,
 	}))
 
-	route.Setup(app, userHandler, authHandler, workspaceHandler, healthHandler, authCfg, cfg.App.Env)
+	route.Setup(app, userHandler, authHandler, workspaceHandler, inviteHandler, realtimeHandler, healthHandler, authCfg, cfg.App.Env)
 
 	go func() {
 		addr := ":" + cfg.App.Port
@@ -164,6 +182,9 @@ func main() {
 	if err := obsProvider.Shutdown(shutCtx); err != nil {
 		log.Error().Err(err).Msg("observability provider shutdown error")
 	}
+	stopRealtime()
+	_ = listener.Close()
+	_ = notifier.Close()
 	sqlDB.Close() //nolint:errcheck
 
 	log.Info().Msg("shutdown complete")

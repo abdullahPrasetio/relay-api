@@ -44,7 +44,17 @@ func (r *workspaceRepository) CreateWorkspace(ctx context.Context, workspace *en
 		).Error; err != nil {
 			return fmt.Errorf("insert workspace owner: %w", err)
 		}
-		return nil
+		meta, err := json.Marshal(map[string]string{"name": workspace.Name})
+		if err != nil {
+			return fmt.Errorf("encode workspace audit meta: %w", err)
+		}
+		return insertAudit(tx, &entity.AuditEvent{
+			WorkspaceID: workspace.ID,
+			ActorID:     workspace.OwnerID,
+			Action:      AuditWorkspaceCreate,
+			Target:      workspace.ID,
+			Meta:        meta,
+		})
 	})
 	if err != nil {
 		return err
@@ -91,30 +101,50 @@ func (r *workspaceRepository) ListWorkspacesForUser(ctx context.Context, userID 
 	return out, nil
 }
 
-func (r *workspaceRepository) RenameWorkspace(ctx context.Context, id, name string) error {
-	res := r.db.WithContext(ctx).Exec(
-		`UPDATE workspaces SET name = ? WHERE id = ? AND deleted_at IS NULL`, name, id,
-	)
-	if res.Error != nil {
-		return fmt.Errorf("rename workspace: %w", res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+func (r *workspaceRepository) RenameWorkspace(ctx context.Context, id, name string, actorID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec(
+			`UPDATE workspaces SET name = ? WHERE id = ? AND deleted_at IS NULL`, name, id,
+		)
+		if res.Error != nil {
+			return fmt.Errorf("rename workspace: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		meta, err := json.Marshal(map[string]string{"name": name})
+		if err != nil {
+			return fmt.Errorf("encode workspace audit meta: %w", err)
+		}
+		return insertAudit(tx, &entity.AuditEvent{
+			WorkspaceID: id,
+			ActorID:     actorID,
+			Action:      AuditWorkspaceRename,
+			Target:      id,
+			Meta:        meta,
+		})
+	})
 }
 
-func (r *workspaceRepository) SoftDeleteWorkspace(ctx context.Context, id string) error {
-	res := r.db.WithContext(ctx).Exec(
-		`UPDATE workspaces SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL`, id,
-	)
-	if res.Error != nil {
-		return fmt.Errorf("delete workspace: %w", res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+func (r *workspaceRepository) SoftDeleteWorkspace(ctx context.Context, id string, actorID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec(
+			`UPDATE workspaces SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL`, id,
+		)
+		if res.Error != nil {
+			return fmt.Errorf("delete workspace: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return insertAudit(tx, &entity.AuditEvent{
+			WorkspaceID: id,
+			ActorID:     actorID,
+			Action:      AuditWorkspaceDelete,
+			Target:      id,
+			Meta:        json.RawMessage(`{}`),
+		})
+	})
 }
 
 func (r *workspaceRepository) GetMember(ctx context.Context, workspaceID string, userID uuid.UUID) (*entity.WorkspaceMember, error) {
@@ -157,47 +187,83 @@ func (r *workspaceRepository) ListMembers(ctx context.Context, workspaceID strin
 
 func (r *workspaceRepository) AddMember(ctx context.Context, member *entity.WorkspaceMember) error {
 	member.CreatedAt = time.Now().UTC()
-	res := r.db.WithContext(ctx).Exec(
-		`INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, created_at)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT (workspace_id, user_id) DO NOTHING`,
-		member.WorkspaceID, member.UserID, string(member.Role), member.InvitedBy, member.CreatedAt,
-	)
-	if res.Error != nil {
-		return fmt.Errorf("add workspace member: %w", res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return domainrepo.ErrMemberExists
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec(
+			`INSERT INTO workspace_members (workspace_id, user_id, role, invited_by, created_at)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT (workspace_id, user_id) DO NOTHING`,
+			member.WorkspaceID, member.UserID, string(member.Role), member.InvitedBy, member.CreatedAt,
+		)
+		if res.Error != nil {
+			return fmt.Errorf("add workspace member: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return domainrepo.ErrMemberExists
+		}
+		actorID := member.UserID
+		if member.InvitedBy != nil {
+			actorID = *member.InvitedBy
+		}
+		meta, err := json.Marshal(map[string]string{"role": string(member.Role)})
+		if err != nil {
+			return fmt.Errorf("encode member audit meta: %w", err)
+		}
+		return insertAudit(tx, &entity.AuditEvent{
+			WorkspaceID: member.WorkspaceID,
+			ActorID:     actorID,
+			Action:      AuditMemberAdd,
+			Target:      member.UserID.String(),
+			Meta:        meta,
+		})
+	})
 }
 
-func (r *workspaceRepository) UpdateMemberRole(ctx context.Context, workspaceID string, userID uuid.UUID, role entity.Role) error {
-	res := r.db.WithContext(ctx).Exec(
-		`UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?`,
-		string(role), workspaceID, userID,
-	)
-	if res.Error != nil {
-		return fmt.Errorf("update member role: %w", res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+func (r *workspaceRepository) UpdateMemberRole(ctx context.Context, workspaceID string, userID uuid.UUID, role entity.Role, actorID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec(
+			`UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?`,
+			string(role), workspaceID, userID,
+		)
+		if res.Error != nil {
+			return fmt.Errorf("update member role: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		meta, err := json.Marshal(map[string]string{"role": string(role)})
+		if err != nil {
+			return fmt.Errorf("encode member audit meta: %w", err)
+		}
+		return insertAudit(tx, &entity.AuditEvent{
+			WorkspaceID: workspaceID,
+			ActorID:     actorID,
+			Action:      AuditMemberRoleChange,
+			Target:      userID.String(),
+			Meta:        meta,
+		})
+	})
 }
 
-func (r *workspaceRepository) RemoveMember(ctx context.Context, workspaceID string, userID uuid.UUID) error {
-	res := r.db.WithContext(ctx).Exec(
-		`DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
-		workspaceID, userID,
-	)
-	if res.Error != nil {
-		return fmt.Errorf("remove member: %w", res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+func (r *workspaceRepository) RemoveMember(ctx context.Context, workspaceID string, userID uuid.UUID, actorID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Exec(
+			`DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
+			workspaceID, userID,
+		)
+		if res.Error != nil {
+			return fmt.Errorf("remove member: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return insertAudit(tx, &entity.AuditEvent{
+			WorkspaceID: workspaceID,
+			ActorID:     actorID,
+			Action:      AuditMemberRemove,
+			Target:      userID.String(),
+			Meta:        json.RawMessage(`{}`),
+		})
+	})
 }
 
 // PushChanges applies a batch in one transaction. Every change is either

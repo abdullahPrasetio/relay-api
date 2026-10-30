@@ -192,6 +192,28 @@ func (h *WorkspaceHandler) RemoveMember(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+// ListAudit returns the workspace audit feed (admin+), newest first.
+func (h *WorkspaceHandler) ListAudit(c *fiber.Ctx) error {
+	uid, ok := callerID(c)
+	if !ok {
+		return response.Unauthorized(c)
+	}
+	events, nextBefore, err := h.uc.ListAudit(
+		c.UserContext(),
+		uid,
+		c.Params("id"),
+		int64(c.QueryInt("before", 0)),
+		c.QueryInt("limit", 50),
+	)
+	if err != nil {
+		return workspaceError(c, err)
+	}
+	return response.Success(c, "audit events retrieved", fiber.Map{
+		"events":     events,
+		"nextBefore": nextBefore,
+	})
+}
+
 // Pull returns entity changes after the client cursor (?since=<seq>).
 func (h *WorkspaceHandler) Pull(c *fiber.Ctx) error {
 	uid, ok := callerID(c)

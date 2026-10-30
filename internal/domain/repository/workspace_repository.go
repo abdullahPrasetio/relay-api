@@ -29,14 +29,18 @@ type WorkspaceRepository interface {
 	CreateWorkspace(ctx context.Context, workspace *entity.Workspace, ownerRole entity.Role) error
 	GetWorkspace(ctx context.Context, id string) (*entity.Workspace, error)
 	ListWorkspacesForUser(ctx context.Context, userID uuid.UUID) ([]entity.WorkspaceWithRole, error)
-	RenameWorkspace(ctx context.Context, id, name string) error
-	SoftDeleteWorkspace(ctx context.Context, id string) error
+	RenameWorkspace(ctx context.Context, id, name string, actorID uuid.UUID) error
+	SoftDeleteWorkspace(ctx context.Context, id string, actorID uuid.UUID) error
 
 	GetMember(ctx context.Context, workspaceID string, userID uuid.UUID) (*entity.WorkspaceMember, error)
 	ListMembers(ctx context.Context, workspaceID string) ([]*entity.WorkspaceMember, error)
 	AddMember(ctx context.Context, member *entity.WorkspaceMember) error
-	UpdateMemberRole(ctx context.Context, workspaceID string, userID uuid.UUID, role entity.Role) error
-	RemoveMember(ctx context.Context, workspaceID string, userID uuid.UUID) error
+	UpdateMemberRole(ctx context.Context, workspaceID string, userID uuid.UUID, role entity.Role, actorID uuid.UUID) error
+	RemoveMember(ctx context.Context, workspaceID string, userID uuid.UUID, actorID uuid.UUID) error
+
+	// ListAudit returns workspace audit events newest-first, using the last
+	// event id of the previous page as the exclusive cursor.
+	ListAudit(ctx context.Context, workspaceID string, beforeID int64, limit int) ([]entity.AuditEvent, error)
 
 	PushChanges(ctx context.Context, workspaceID string, actorID uuid.UUID, changes []entity.Change) ([]entity.PushResult, int64, error)
 	PullChanges(ctx context.Context, workspaceID string, userID uuid.UUID, since int64, limit int) (*entity.PullResult, error)
