@@ -465,9 +465,10 @@ func (u *authUseCase) newTokens(user *entity.User) (*AuthTokens, error) {
 }
 
 func (u *authUseCase) sealTokens(tokens *AuthTokens) ([]byte, error) {
+	// #nosec G117 -- the envelope is encrypted with AES-GCM below and never logged.
 	payload, err := json.Marshal(tokenEnvelope{
-		AccessToken:  tokens.AccessToken,
-		RefreshToken: tokens.RefreshToken,
+		AccessToken:  tokens.AccessToken,  // #nosec G117 -- sealed immediately below
+		RefreshToken: tokens.RefreshToken, // #nosec G117 -- sealed immediately below
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode replacement tokens: %w", err)
