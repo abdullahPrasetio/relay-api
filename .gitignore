@@ -27,3 +27,6 @@ logs/*.gz
 .vscode/
 *.swp
 *.swo
+
+# Local server binary produced by `go build ./cmd/api`
+/api
