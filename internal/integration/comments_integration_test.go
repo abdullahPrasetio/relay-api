@@ -88,10 +88,17 @@ func newCommentHarness(t *testing.T) *commentHarness {
 		dbrepo.NewCommentRepository(gdb),
 	)
 
+	profiles := []struct{ name, email string }{
+		{"Olive Owner", "owner@example.test"},
+		{"Adam Admin", "admin@example.test"},
+		{"Eli Editor", "editor@example.test"},
+		{"Vera Viewer", "viewer@example.test"},
+		{"Oscar Outsider", "outsider@example.test"},
+	}
 	for i, id := range []uuid.UUID{h.owner, h.admin, h.editor, h.viewer, h.outsider} {
 		res := gdb.Exec(
 			`INSERT INTO users (id, name, email, password) VALUES (?, ?, ?, ?)`,
-			id, "user", "comment"+string(rune('a'+i))+"@example.test", "hash",
+			id, profiles[i].name, profiles[i].email, "hash",
 		)
 		require.NoError(t, res.Error)
 	}

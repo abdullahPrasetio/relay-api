@@ -168,10 +168,12 @@ func (r *workspaceRepository) GetMember(ctx context.Context, workspaceID string,
 func (r *workspaceRepository) ListMembers(ctx context.Context, workspaceID string) ([]*entity.WorkspaceMember, error) {
 	var rows []memberRow
 	err := r.db.WithContext(ctx).Raw(
-		`SELECT workspace_id, user_id, role, invited_by, created_at
-		   FROM workspace_members
-		  WHERE workspace_id = ?
-		  ORDER BY created_at ASC, user_id ASC`,
+		`SELECT m.workspace_id, m.user_id, m.role, m.invited_by, m.created_at,
+		        u.name, u.email
+		   FROM workspace_members m
+		   JOIN users u ON u.id = m.user_id
+		  WHERE m.workspace_id = ?
+		  ORDER BY m.created_at ASC, m.user_id ASC`,
 		workspaceID,
 	).Scan(&rows).Error
 	if err != nil {
@@ -647,6 +649,8 @@ type memberRow struct {
 	WorkspaceID string    `gorm:"column:workspace_id"`
 	UserID      uuid.UUID `gorm:"column:user_id"`
 	Role        string    `gorm:"column:role"`
+	Name        string    `gorm:"column:name"`
+	Email       string    `gorm:"column:email"`
 	InvitedBy   uuid.UUID `gorm:"column:invited_by"`
 	CreatedAt   time.Time `gorm:"column:created_at"`
 }
@@ -656,6 +660,8 @@ func (r memberRow) toEntity() *entity.WorkspaceMember {
 		WorkspaceID: r.WorkspaceID,
 		UserID:      r.UserID,
 		Role:        entity.Role(r.Role),
+		Name:        r.Name,
+		Email:       r.Email,
 		CreatedAt:   r.CreatedAt,
 	}
 	if r.InvitedBy != uuid.Nil {

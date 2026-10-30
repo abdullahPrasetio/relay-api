@@ -74,7 +74,15 @@ refresh.
 | Workspaces | `GET /api/v1/workspaces`, `POST /api/v1/workspaces`, `GET /api/v1/workspaces/:id`, `PATCH /api/v1/workspaces/:id`, `DELETE /api/v1/workspaces/:id` | Bearer; rename needs admin+, delete needs owner |
 | Members | `GET /api/v1/workspaces/:id/members`, `POST /api/v1/workspaces/:id/members`, `PATCH /api/v1/workspaces/:id/members/:userId`, `DELETE /api/v1/workspaces/:id/members/:userId` | Bearer; members list, owner/admin manage |
 | Changes | `GET /api/v1/workspaces/:id/changes?since=0&limit=500`, `POST /api/v1/workspaces/:id/changes` | Bearer; viewer+ pull, editor+ push |
+| Comments | `GET /api/v1/workspaces/:id/comments?entityId=<id>&before=&limit=`, `POST /api/v1/workspaces/:id/comments`, `PATCH /api/v1/comments/:id`, `DELETE /api/v1/comments/:id` | Bearer; viewer+ read, any member posts, author/admin+ edit |
+| Mentions | `GET /api/v1/workspaces/:id/mentions?before=&limit=` | Bearer; viewer+; comments mentioning the caller |
 | Metrics | `GET /metrics` | Public outside production |
+
+Comment payloads accept `mentions: [userId]`; every id must be a current
+workspace member (otherwise `422`) and duplicates are collapsed. Comment
+responses carry `authorName` and `mentions: [{userId, name}]`, the mentions
+feed returns `{comments, nextBefore}` newest-first, and the member listing
+includes each member's `name` and `email`.
 
 The original scaffold's generic user CRUD (`GET`/`POST /api/v1/users` and
 `GET`/`PUT`/`DELETE /api/v1/users/:id`) is still mounted publicly; it is not

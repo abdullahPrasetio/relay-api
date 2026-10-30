@@ -93,11 +93,14 @@ type WorkspaceWithRole struct {
 	Role Role `json:"role"`
 }
 
-// WorkspaceMember is a membership row.
+// WorkspaceMember is a membership row. Name and Email are the member's user
+// profile fields; they are filled by member listings and empty elsewhere.
 type WorkspaceMember struct {
 	WorkspaceID string     `json:"workspaceId"`
 	UserID      uuid.UUID  `json:"userId"`
 	Role        Role       `json:"role"`
+	Name        string     `json:"name,omitempty"`
+	Email       string     `json:"email,omitempty"`
 	InvitedBy   *uuid.UUID `json:"invitedBy,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"`
 }

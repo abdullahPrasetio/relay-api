@@ -71,6 +71,7 @@ func TestSetupRegistersInviteAndAuditRoutes(t *testing.T) {
 		"POST /api/v1/monitors/:id/run",
 		"GET /api/v1/workspaces/:id/comments",
 		"POST /api/v1/workspaces/:id/comments",
+		"GET /api/v1/workspaces/:id/mentions",
 		"PATCH /api/v1/comments/:id",
 		"DELETE /api/v1/comments/:id",
 	}
@@ -128,6 +129,14 @@ func TestSetupRegistersInviteAndAuditRoutes(t *testing.T) {
 	}
 	if res.StatusCode != fiber.StatusUnauthorized {
 		t.Fatalf("PATCH /comments/:id status = %d, want 401", res.StatusCode)
+	}
+
+	res, err = app.Test(httptest.NewRequest("GET", "/api/v1/workspaces/ws_x/mentions", nil))
+	if err != nil {
+		t.Fatalf("mentions request: %v", err)
+	}
+	if res.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("GET /workspaces/:id/mentions status = %d, want 401", res.StatusCode)
 	}
 }
 

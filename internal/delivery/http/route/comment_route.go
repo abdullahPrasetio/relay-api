@@ -14,6 +14,7 @@ func RegisterCommentRoutes(router fiber.Router, h *handler.CommentHandler, authC
 	ws := router.Group("/workspaces", auth.Middleware(authCfg))
 	ws.Get("/:id/comments", h.List)
 	ws.Post("/:id/comments", h.Create)
+	ws.Get("/:id/mentions", h.MentionsFeed)
 
 	comments := router.Group("/comments", auth.Middleware(authCfg))
 	comments.Patch("/:id", h.Update)

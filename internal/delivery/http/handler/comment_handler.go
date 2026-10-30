@@ -73,6 +73,39 @@ func (h *CommentHandler) List(c *fiber.Ctx) error {
 	return response.Success(c, "comments retrieved", payload)
 }
 
+// MentionsFeed returns the workspace comments that mention the caller,
+// newest-first (?before=&limit=).
+func (h *CommentHandler) MentionsFeed(c *fiber.Ctx) error {
+	uid, ok := callerID(c)
+	if !ok {
+		return response.Unauthorized(c)
+	}
+
+	var before *uuid.UUID
+	if raw := strings.TrimSpace(c.Query("before")); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			return response.BadRequest(c, "invalid before cursor")
+		}
+		before = &parsed
+	}
+
+	comments, nextBefore, err := h.uc.ListMentions(
+		c.UserContext(),
+		uid,
+		c.Params("id"),
+		before,
+		c.QueryInt("limit", 50),
+	)
+	if err != nil {
+		return commentError(c, err)
+	}
+	return response.Success(c, "mentions retrieved", fiber.Map{
+		"comments":   comments,
+		"nextBefore": nextBefore,
+	})
+}
+
 // Create posts a comment on an existing workspace entity.
 func (h *CommentHandler) Create(c *fiber.Ctx) error {
 	uid, ok := callerID(c)
@@ -80,8 +113,9 @@ func (h *CommentHandler) Create(c *fiber.Ctx) error {
 		return response.Unauthorized(c)
 	}
 	var req struct {
-		EntityID string `json:"entityId"`
-		Body     string `json:"body"`
+		EntityID string      `json:"entityId"`
+		Body     string      `json:"body"`
+		Mentions []uuid.UUID `json:"mentions"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return response.BadRequest(c, "invalid request body")
@@ -90,6 +124,7 @@ func (h *CommentHandler) Create(c *fiber.Ctx) error {
 	comment, err := h.uc.Create(c.UserContext(), uid, c.Params("id"), usecase.CreateCommentInput{
 		EntityID: req.EntityID,
 		Body:     req.Body,
+		Mentions: req.Mentions,
 	})
 	if err != nil {
 		return commentError(c, err)
@@ -108,8 +143,9 @@ func (h *CommentHandler) Update(c *fiber.Ctx) error {
 		return response.BadRequest(c, "invalid comment id")
 	}
 	var req struct {
-		Body     *string `json:"body"`
-		Resolved *bool   `json:"resolved"`
+		Body     *string      `json:"body"`
+		Resolved *bool        `json:"resolved"`
+		Mentions *[]uuid.UUID `json:"mentions"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return response.BadRequest(c, "invalid request body")
@@ -118,6 +154,7 @@ func (h *CommentHandler) Update(c *fiber.Ctx) error {
 	comment, err := h.uc.Update(c.UserContext(), uid, id, usecase.UpdateCommentInput{
 		Body:     req.Body,
 		Resolved: req.Resolved,
+		Mentions: req.Mentions,
 	})
 	if err != nil {
 		return commentError(c, err)
