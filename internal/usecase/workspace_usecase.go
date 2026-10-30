@@ -16,6 +16,11 @@ import (
 	domainrepo "github.com/abdullahPrasetio/relay-api/internal/domain/repository"
 )
 
+// MaxChangesPerPush is the maximum number of changes accepted in one
+// PushChanges call. The HTTP body limit bounds bytes, not rows; without a row
+// cap a single small-but-numerous batch could exhaust the push transaction.
+const MaxChangesPerPush = 200
+
 var (
 	// ErrForbidden means the caller is a member but the role is insufficient.
 	ErrForbidden = errors.New("forbidden")
@@ -254,6 +259,9 @@ func (u *workspaceUseCase) ListAudit(ctx context.Context, userID uuid.UUID, work
 func (u *workspaceUseCase) PushChanges(ctx context.Context, workspaceID string, actorID uuid.UUID, changes []entity.Change) ([]entity.PushResult, int64, error) {
 	if workspaceID == "" || actorID == uuid.Nil {
 		return nil, 0, fmt.Errorf("%w: workspace id and actor id are required", ErrValidation)
+	}
+	if len(changes) > MaxChangesPerPush {
+		return nil, 0, fmt.Errorf("%w: at most %d changes per push, got %d", ErrValidation, MaxChangesPerPush, len(changes))
 	}
 	for i, change := range changes {
 		if err := validateChange(change); err != nil {

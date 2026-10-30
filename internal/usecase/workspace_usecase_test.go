@@ -1,9 +1,15 @@
 package usecase
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/abdullahPrasetio/relay-api/internal/domain/entity"
+	domainrepo "github.com/abdullahPrasetio/relay-api/internal/domain/repository"
 )
 
 func TestRolePermissionMatrix(t *testing.T) {
@@ -143,5 +149,60 @@ func TestValidateChange(t *testing.T) {
 		if err := validateChange(change); err == nil {
 			t.Errorf("case %d: expected validation error", i)
 		}
+	}
+}
+
+// recordingWorkspaceRepo implements only PushChanges. The embedded nil
+// interface panics if any other method is called, which keeps the stub small
+// and proves PushChanges never falls through to the repository.
+type recordingWorkspaceRepo struct {
+	domainrepo.WorkspaceRepository
+	pushCalls int
+}
+
+func (r *recordingWorkspaceRepo) PushChanges(_ context.Context, _ string, _ uuid.UUID, changes []entity.Change) ([]entity.PushResult, int64, error) {
+	r.pushCalls++
+	return make([]entity.PushResult, len(changes)), 42, nil
+}
+
+func TestPushChangesBatchCap(t *testing.T) {
+	repo := &recordingWorkspaceRepo{}
+	uc := NewWorkspaceUseCase(repo)
+	ctx := context.Background()
+	actor := uuid.New()
+
+	batch := func(n int) []entity.Change {
+		changes := make([]entity.Change, n)
+		for i := range changes {
+			changes[i] = entity.Change{
+				OpID:    fmt.Sprintf("op-%d", i),
+				ID:      fmt.Sprintf("req_%d", i),
+				Kind:    entity.KindRequest,
+				Payload: []byte(`{}`),
+			}
+		}
+		return changes
+	}
+
+	results, seq, err := uc.PushChanges(ctx, "ws_1", actor, batch(MaxChangesPerPush))
+	if err != nil {
+		t.Fatalf("batch of %d changes rejected: %v", MaxChangesPerPush, err)
+	}
+	if len(results) != MaxChangesPerPush || seq != 42 {
+		t.Fatalf("got %d results / seq %d, want %d / 42", len(results), seq, MaxChangesPerPush)
+	}
+	if repo.pushCalls != 1 {
+		t.Fatalf("repository called %d times, want 1", repo.pushCalls)
+	}
+
+	results, seq, err = uc.PushChanges(ctx, "ws_1", actor, batch(MaxChangesPerPush+1))
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("oversized batch error = %v, want ErrValidation", err)
+	}
+	if results != nil || seq != 0 {
+		t.Fatalf("oversized batch returned results %v / seq %d, want nil / 0", results, seq)
+	}
+	if repo.pushCalls != 1 {
+		t.Fatalf("repository called for oversized batch (%d calls), want 1", repo.pushCalls)
 	}
 }
