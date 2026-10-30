@@ -123,6 +123,11 @@ func main() {
 	)
 	monitorUC := usecase.NewMonitorUseCase(workspaceRepo, monitorRepo, monitorExecutor)
 
+	commentRepo := dbrepo.NewCommentRepository(db)
+	commentUC := usecase.NewCommentUseCase(workspaceRepo, commentRepo)
+
+	keyUC := usecase.NewKeyUseCase(dbrepo.NewDeviceKeyRepository(db), workspaceRepo)
+
 	startTime := time.Now()
 	userHandler := handler.NewUserHandler(userUC, val)
 	authHandler := handler.NewAuthHandler(authUC, val)
@@ -130,6 +135,8 @@ func main() {
 	inviteHandler := handler.NewInviteHandler(inviteUC)
 	realtimeHandler := handler.NewRealtimeHandler(workspaceUC, listener, presence)
 	monitorHandler := handler.NewMonitorHandler(monitorUC)
+	commentHandler := handler.NewCommentHandler(commentUC)
+	keyHandler := handler.NewKeyHandler(keyUC)
 	healthHandler := handler.NewHealthHandler(sqlDB, startTime, version)
 
 	app := fiber.New(fiber.Config{
@@ -167,7 +174,7 @@ func main() {
 		CaptureBodies: cfg.Log.HTTPBodies,
 	}))
 
-	route.Setup(app, userHandler, authHandler, workspaceHandler, inviteHandler, realtimeHandler, monitorHandler, healthHandler, authCfg, cfg.App.Env)
+	route.Setup(app, userHandler, authHandler, workspaceHandler, inviteHandler, realtimeHandler, monitorHandler, commentHandler, keyHandler, healthHandler, authCfg, cfg.App.Env)
 
 	go func() {
 		addr := ":" + cfg.App.Port

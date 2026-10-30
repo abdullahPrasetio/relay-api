@@ -42,6 +42,8 @@ func TestSetupRegistersInviteAndAuditRoutes(t *testing.T) {
 		handler.NewInviteHandler(stubInviteUseCase{}),
 		&handler.RealtimeHandler{},
 		&handler.MonitorHandler{},
+		&handler.CommentHandler{},
+		&handler.KeyHandler{},
 		&handler.HealthHandler{},
 		&auth.Config{Secret: "test-secret-at-least-32-bytes-long!!"},
 		"test",
@@ -67,6 +69,10 @@ func TestSetupRegistersInviteAndAuditRoutes(t *testing.T) {
 		"DELETE /api/v1/monitors/:id",
 		"GET /api/v1/monitors/:id/runs",
 		"POST /api/v1/monitors/:id/run",
+		"GET /api/v1/workspaces/:id/comments",
+		"POST /api/v1/workspaces/:id/comments",
+		"PATCH /api/v1/comments/:id",
+		"DELETE /api/v1/comments/:id",
 	}
 	for _, route := range want {
 		if !registered[route] {
@@ -106,6 +112,22 @@ func TestSetupRegistersInviteAndAuditRoutes(t *testing.T) {
 	}
 	if res.StatusCode != fiber.StatusUnauthorized {
 		t.Fatalf("GET /workspaces/:id/audit status = %d, want 401", res.StatusCode)
+	}
+
+	res, err = app.Test(httptest.NewRequest("POST", "/api/v1/workspaces/ws_x/comments", nil))
+	if err != nil {
+		t.Fatalf("create comment request: %v", err)
+	}
+	if res.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("POST /workspaces/:id/comments status = %d, want 401", res.StatusCode)
+	}
+
+	res, err = app.Test(httptest.NewRequest("PATCH", "/api/v1/comments/"+uuid.New().String(), nil))
+	if err != nil {
+		t.Fatalf("patch comment request: %v", err)
+	}
+	if res.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("PATCH /comments/:id status = %d, want 401", res.StatusCode)
 	}
 }
 
