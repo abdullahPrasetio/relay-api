@@ -16,6 +16,7 @@ import (
 	mw "github.com/abdullahPrasetio/relay-api/internal/delivery/http/middleware"
 	"github.com/abdullahPrasetio/relay-api/internal/delivery/http/route"
 	"github.com/abdullahPrasetio/relay-api/internal/domain/entity"
+	"github.com/abdullahPrasetio/relay-api/internal/monitor"
 	"github.com/abdullahPrasetio/relay-api/internal/realtime"
 	dbrepo "github.com/abdullahPrasetio/relay-api/internal/repository/db"
 	"github.com/abdullahPrasetio/relay-api/internal/usecase"
@@ -113,12 +114,22 @@ func main() {
 	workspaceUC := usecase.WithChangeNotifier(usecase.NewWorkspaceUseCase(workspaceRepo), notifier)
 	inviteUC := usecase.NewInviteUseCase(dbrepo.NewInviteRepository(db), workspaceRepo)
 
+	monitorRepo := dbrepo.NewMonitorRepository(db)
+	monitorExecutor := monitor.NewExecutor(
+		monitorRepo,
+		monitor.NewCommandRunnerFromEnv(),
+		monitor.NewWebhookNotifier(),
+		time.Now,
+	)
+	monitorUC := usecase.NewMonitorUseCase(workspaceRepo, monitorRepo, monitorExecutor)
+
 	startTime := time.Now()
 	userHandler := handler.NewUserHandler(userUC, val)
 	authHandler := handler.NewAuthHandler(authUC, val)
 	workspaceHandler := handler.NewWorkspaceHandler(workspaceUC)
 	inviteHandler := handler.NewInviteHandler(inviteUC)
 	realtimeHandler := handler.NewRealtimeHandler(workspaceUC, listener, presence)
+	monitorHandler := handler.NewMonitorHandler(monitorUC)
 	healthHandler := handler.NewHealthHandler(sqlDB, startTime, version)
 
 	app := fiber.New(fiber.Config{
@@ -156,7 +167,7 @@ func main() {
 		CaptureBodies: cfg.Log.HTTPBodies,
 	}))
 
-	route.Setup(app, userHandler, authHandler, workspaceHandler, inviteHandler, realtimeHandler, healthHandler, authCfg, cfg.App.Env)
+	route.Setup(app, userHandler, authHandler, workspaceHandler, inviteHandler, realtimeHandler, monitorHandler, healthHandler, authCfg, cfg.App.Env)
 
 	go func() {
 		addr := ":" + cfg.App.Port

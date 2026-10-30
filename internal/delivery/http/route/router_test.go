@@ -41,6 +41,7 @@ func TestSetupRegistersInviteAndAuditRoutes(t *testing.T) {
 		&handler.WorkspaceHandler{},
 		handler.NewInviteHandler(stubInviteUseCase{}),
 		&handler.RealtimeHandler{},
+		&handler.MonitorHandler{},
 		&handler.HealthHandler{},
 		&auth.Config{Secret: "test-secret-at-least-32-bytes-long!!"},
 		"test",
@@ -59,6 +60,13 @@ func TestSetupRegistersInviteAndAuditRoutes(t *testing.T) {
 		"GET /api/v1/workspaces/:id/stream",
 		"POST /api/v1/workspaces/:id/presence",
 		"GET /api/v1/workspaces/:id/presence",
+		"GET /api/v1/workspaces/:id/monitors",
+		"POST /api/v1/workspaces/:id/monitors",
+		"GET /api/v1/monitors/:id",
+		"PATCH /api/v1/monitors/:id",
+		"DELETE /api/v1/monitors/:id",
+		"GET /api/v1/monitors/:id/runs",
+		"POST /api/v1/monitors/:id/run",
 	}
 	for _, route := range want {
 		if !registered[route] {

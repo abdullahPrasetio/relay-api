@@ -31,6 +31,53 @@ The service starts on `http://localhost:8080`.
 curl http://localhost:8080/health
 ```
 
+## Scheduled monitors
+
+A monitor runs a synced `request` entity on a cron schedule. The API stores
+definitions and run history; `cmd/monitor-worker` executes due rows in the
+background. Runs go through the desktop app's extracted core bundle so variable
+resolution, pre-request scripts and tests behave exactly like the app.
+
+| Method | Path | Role |
+|---|---|---|
+| `GET` / `POST` | `/api/v1/workspaces/:id/monitors` | viewer / editor+ |
+| `GET` / `PATCH` / `DELETE` | `/api/v1/monitors/:id` | viewer / editor+ / editor+ |
+| `GET` | `/api/v1/monitors/:id/runs?limit=50` | viewer+ |
+| `POST` | `/api/v1/monitors/:id/run` | editor+ (synchronous manual run) |
+
+Create body: `{name, requestId, cron, enabled?, alertWebhook?}`; `requestId`
+must be a live `kind='request'` entity in the workspace. PATCH accepts the same
+fields and `alertWebhook: null` clears it. Cron expressions are standard
+five-field cron (or `@daily`/`@hourly`), evaluated in UTC.
+
+Worker configuration (see `.env.example`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `RELAY_CORE_PATH` | cwd | Directory containing `dist-core/relay-core.mjs` |
+| `MONITOR_RUNNER_CMD` | `node dist-core/relay-core.mjs` | Runner command, split on whitespace, no shell |
+| `MONITOR_RUNNER_TIMEOUT` | `60s` | Per-run subprocess timeout |
+| `MONITOR_POLL_INTERVAL` | `5s` | Claim loop interval |
+| `MONITOR_BATCH_SIZE` | `10` | Monitors claimed per tick |
+
+Core CLI contract (stdin/stdout, also used by the app build):
+
+```text
+stdin : {"workspace": {id,name,collections,environments,globals,activeEnvId},
+         "requestId": "req_…", "environmentId": "env_…" | null}
+stdout: {"response": {"status": 200, "headers": [{"key","value"}],
+                      "body": "…", "timeMs": 12} | null,
+         "testResults": [{"name","passed","error"?}],
+         "error": null | "message"}
+exit  : 0 executed (4xx/5xx and failed assertions still 0), 1 execution
+        error, 2 invalid stdin / request or environment not found
+```
+
+A run is healthy when the CLI reports no error, every test passed, and the HTTP
+status is `< 400`. The worker stores the run before sending the failure alert
+(`{monitor, run, workspaceId}` POST, exponential backoff) so an unreachable
+webhook never loses history. Alerts fire once per ok→fail transition.
+
 ## Generate a new domain
 
 ```bash
